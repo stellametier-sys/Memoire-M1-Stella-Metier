@@ -8,8 +8,8 @@
 
 # Packages 
 local({
-  req <- c("rstudioapi", "ggrepel", "clusterCrit", "fpc", "pairwiseAdonis", "tidyverse", "vegan", "ggrepel",
-           "readxl", "readr","dendextend", "FactoMineR", "factoextra", "tibble", "quarto", "httpuv")
+  req <- c("rstudioapi", "ggrepel", "clusterCrit", "fpc", "pairwiseAdonis", "tidyverse", "vegan", 
+           "readxl", "readr", "dendextend", "FactoMineR", "factoextra", "tibble", "quarto", "httpuv", "tidyselect")
   manquants <- req[!(req %in% installed.packages()[,"Package"])]
   if(length(manquants) > 0) install.packages(manquants, dependencies = TRUE)
 })
@@ -21,7 +21,6 @@ library(fpc)
 library(pairwiseAdonis)
 library(tidyverse)
 library(vegan)
-library(ggrepel)
 library(readxl)
 library(readr)
 library(FactoMineR)
@@ -30,6 +29,10 @@ library(tibble)
 library(quarto)
 library(httpuv)
 library(dendextend)
+library(tidyselect) 
+
+select <- dplyr::select
+filter <- dplyr::filter
 
 # Rafraîchit le Viewer avec le contenu HTML + un bouton "Continuer" collé en bas
 
@@ -597,7 +600,8 @@ resultats_analyse <- list()
 for(g in groupes) {
   parts <- strsplit(g, "_")[[1]]
   sous_data <- Data_pa %>% filter(id_transect == parts[1], Année == as.numeric(parts[2]))
-  mat <- sous_data %>% select(all_of(colonnes_especes)) %>% select(where(~sum(.) > 0))
+  mat_temp <- sous_data %>% dplyr::select(all_of(colonnes_especes))
+  mat <- mat_temp[, colSums(mat_temp) > 0, drop = FALSE]
   if(ncol(mat) >= 2 && nrow(mat) >= 2) {
     acc <- specaccum(mat, method = "exact")
     mods <- list(Arrhenius = fitspecaccum(acc, "arrhenius"), Gleason = fitspecaccum(acc, "gleason"), 
@@ -727,11 +731,12 @@ pause_viewer(historique_guide)
 # Supprimer les listes et variables temporaires
 rm(sous_data, mat, acc, mods, df_aic, html_aic, input_val)
 
- ## 2.2 DIVERSITÉ ALPHA (α) ----
+## 2.2 Richesse spécifique ----
 
 # Calcul de la Richesse Spécifique (S) uniquement
+# On utilise dplyr::select pour éviter les conflits et colSums pour la robustesse
 alpha_data <- Data %>%
-  mutate(S = rowSums(select(., all_of(colonnes_especes)) > 0))
+  mutate(S = rowSums(dplyr::select(., all_of(colonnes_especes)) > 0))
 
 # Fusion manuelle des stades
 ref_df <- annotations_all[[site]]
@@ -754,8 +759,16 @@ for (an in unique(alpha_data$Année)) {
   for (i in 1:ncol(paires)) {
     g1 <- paires[1, i]; g2 <- paires[2, i]
     d_pair <- data_an %>% filter(stade %in% c(g1, g2))
-    test_res <- if(shapiro.test(d_pair$S)$p.value > 0.05) t.test(S ~ stade, d_pair) else wilcox.test(S ~ stade, d_pair)
-    resultats_sync <- rbind(resultats_sync, data.frame(Annee = an, Comparaison = paste(g1, "vs", g2), Test = ifelse(shapiro.test(d_pair$S)$p.value > 0.05, "Student", "Wilcoxon"), Moy_G1 = round(mean(d_pair$S[d_pair$stade == g1]), 2), Moy_G2 = round(mean(d_pair$S[d_pair$stade == g2]), 2), P_value = round(test_res$p.value, 4)))
+    # Test de normalité sécurisé
+    is_normal <- shapiro.test(d_pair$S)$p.value > 0.05
+    test_res <- if(is_normal) t.test(S ~ stade, d_pair) else wilcox.test(S ~ stade, d_pair)
+    resultats_sync <- rbind(resultats_sync, data.frame(
+      Annee = an, Comparaison = paste(g1, "vs", g2), 
+      Test = ifelse(is_normal, "Student", "Wilcoxon"), 
+      Moy_G1 = round(mean(d_pair$S[d_pair$stade == g1]), 2), 
+      Moy_G2 = round(mean(d_pair$S[d_pair$stade == g2]), 2), 
+      P_value = round(test_res$p.value, 4)
+    ))
   }
 }
 
@@ -764,8 +777,15 @@ resultats_diachro <- data.frame()
 for (s in unique(alpha_data$stade[alpha_data$stade != "Inconnu"])) {
   d_stade <- alpha_data %>% filter(stade == s)
   if(length(unique(d_stade$Année)) < 2) next
-  test_res <- if(shapiro.test(d_stade$S)$p.value > 0.05) t.test(S ~ Année, d_stade) else wilcox.test(S ~ Année, d_stade)
-  resultats_diachro <- rbind(resultats_diachro, data.frame(Stade = s, Comparaison = "2025 vs 2026", Test = ifelse(shapiro.test(d_stade$S)$p.value > 0.05, "Student", "Wilcoxon"), Moy_2025 = round(mean(d_stade$S[d_stade$Année == 2025]), 2), Moy_2026 = round(mean(d_stade$S[d_stade$Année == 2026]), 2), P_value = round(test_res$p.value, 4)))
+  is_normal <- shapiro.test(d_stade$S)$p.value > 0.05
+  test_res <- if(is_normal) t.test(S ~ Année, d_stade) else wilcox.test(S ~ Année, d_stade)
+  resultats_diachro <- rbind(resultats_diachro, data.frame(
+    Stade = s, Comparaison = "2025 vs 2026", 
+    Test = ifelse(is_normal, "Student", "Wilcoxon"), 
+    Moy_2025 = round(mean(d_stade$S[d_stade$Année == 2025]), 2), 
+    Moy_2026 = round(mean(d_stade$S[d_stade$Année == 2026]), 2), 
+    P_value = round(test_res$p.value, 4)
+  ))
 }
 
 # Génération du graphique
@@ -774,35 +794,34 @@ p_richesse <- ggplot(alpha_data, aes(x = id_transect, y = S, fill = stade)) +
   facet_wrap(~Année) + 
   scale_fill_manual(values = couleurs_stade, na.value = "grey80") +
   theme_minimal() + 
-  labs(title = paste("Richesse spécifique (S) -", site), y = "Nombre d'espèces", x = "Transect", fill = "Stade de restauration")
+  labs(title = paste("Richesse spécifique (S) -", site), y = "Nombre d'espèces", x = "Transect", fill = "Stade")
 
 print(p_richesse)
 save_graph(p_richesse, paste0("Richesse spécifique _ ", site))
 
 # Mise à jour du Viewer
-if (!requireNamespace("knitr", quietly = TRUE)) install.packages("knitr")
-
 explication_alpha <- paste0("
-<div class='etape' style='border-left: 6px solid #27ae60;'>
-  <p style='color: #27ae60; margin-top:0;'><b>Analyse de la diversité Alpha</b></p>
-  <p>Analyse de la <b>Richesse Spécifique (S)</b> avec tests statistiques.</p>
+<div class='etape' style='border-left: 6px solid #27ae60; padding:10px;'>
+  <p style='color: #27ae60; margin-top:0;'><b>Analyse de la Richesse Spécifique</b></p>
+  <p>Analyse de la <b>Richesse Spécifique (S)</b> avec tests statistiques associés.</p>
 </div>
 
-<div class='etape' style='border-left: 6px solid #8e44ad; background-color: #fcfbfd; margin-top: 15px;'>
+<div class='etape' style='border-left: 6px solid #8e44ad; background-color: #fcfbfd; margin-top: 15px; padding:10px;'>
   <p style='color: #8e44ad; margin-top:0; font-size: 1.1em;'><b>RÉSULTATS STATISTIQUES</b></p>
-  <p>Synchronique :</p>
-  ", knitr::kable(resultats_sync, format = "html", table.attr = "style='width:100%; font-size: 12px;'"), "
-  <p>Diachronique :</p>
-  ", knitr::kable(resultats_diachro, format = "html", table.attr = "style='width:100%; font-size: 12px;'"), "
+  <p><b>Synchronique :</b></p>
+  ", knitr::kable(resultats_sync, format = "html", table.attr = "style='width:100%; font-size: 11px;'"), "
+  <p><b>Diachronique :</b></p>
+  ", knitr::kable(resultats_diachro, format = "html", table.attr = "style='width:100%; font-size: 11px;'"), "
 </div>")
 
 historique_guide <- paste0(historique_guide, explication_alpha)
 pause_viewer(historique_guide)
 
+
 ## 2.3 DIVERSITÉ BÊTA (β) ----
 
 # Préparation des données
-mat_num <- alpha_data %>% select(all_of(colonnes_especes)) 
+mat_num <- alpha_data %>% select(all_of(colonnes_especes))
 lignes_a_garder <- rowSums(mat_num > 0) > 0
 mat_num_filtre <- mat_num[lignes_a_garder, ]
 df_filtre <- alpha_data[lignes_a_garder, ] %>% select(id_sous_unité, Année, stade)
@@ -842,7 +861,7 @@ dessiner_dendrogramme <- function(marge_bas = 30, agrandir = FALSE) {
   text(x = 0, y = -0.8, labels = "2026", cex = cex_ann, font = 2, xpd = NA, pos = 2)  
   # Légende (agrandie sur les exports)
   legend("topright", legend = names(couleurs_stade), fill = couleurs_stade, 
-         title = "stade", bty = "n", cex = cex_leg, inset = c(0.01, 0.01))
+         title = "Stade de restauration", bty = "n", cex = cex_leg, inset = c(0.01, 0.01))
 }
 
 # Exportations
@@ -1015,321 +1034,164 @@ historique_guide <- paste0(historique_guide, etape_indicateurs)
 pause_viewer(historique_guide)
 
 
-  ## 2.5 ANALYSE TYPE BIOLOGIQUE ----
+## 2.5 EXPLORATION MULTIDIMENSIONNEL ----
 
-# Liste des ajouts manuels pour compléter la base de référence
-ajouts_manuels <- tribble(
-  ~nom, ~type_bio,
-  "Allium sp.", "G",
-  "Arabis sp.", "H",
-  "Campanula sp.", "H",
-  "Cephalanthera sp.", "G",
-  "Lathyrus sp.", "T",
-  "Lotus dorycnium", "C",
-  "Lotus hirsutus", "C",
-  "Ophrys sp.", "G",
-  "Petrosedum sediforme", "C",
-  "Trifolium sp.", "T",
-  "Homalothecium lutescens", "B",
-  "Homalothecium sp.", "B",
-  "Syntrichia calcicola", "B",
-  "Tortella squarrosa", "B",
-  "Tortella tortuosa", "B",
-  "Weissia controversa", "B",
-  "Rosa sp.", "P",
-  "Scabiosa sp.", "H",
-  "Rubus sp.", "H",
-  "Bunium bulbocastanum", "G",
-  "Ferula communis", "H",
-  "Festuca sp.", "H",
-  "Gladiolus sp.", "G",
-  "Muscari baeticum", "G",
-  "Muscari matritensis", "G",
-  "Vitis sp.", "P",
-  "Vicia saxatilis", "T"
-)
+### 2.5.1 AFC ET VECTEURS ----
 
-# Conversion de baseflor et harmonisation
-referentiel_bio <- baseflor %>%
-  mutate(nom = nettoyer_nom_colonne(NOM_SCIENTIFIQUE)) %>%
-  mutate(type_bio = case_when(
-    str_starts(TYPE_BIOLOGIQUE, "A|B|a|b") ~ "P",
-    TRUE ~ toupper(str_sub(TYPE_BIOLOGIQUE, 1, 1))
-  )) %>%
-  select(nom, type_bio)
-
-# Fusion : les ajouts manuels sont prioritaires
-tableau_reference <- bind_rows(referentiel_bio, ajouts_manuels) %>%
-  distinct(nom, .keep_all = TRUE) %>%
-  filter(!is.na(type_bio))
-
-# Création du vecteur de référence pour la jointure
-typebio <- setNames(tableau_reference$type_bio, tableau_reference$nom)
-
-# Passage en format long
-quad_long <- Data %>%
-  pivot_longer(
-    cols = -all_of(c("id", "Année", "id_transect", "id_sous_unité")), 
-    names_to = "nom", 
-    values_to = "presence"
-  ) %>%
-  mutate(type_bio = typebio[nom]) %>%
-  filter(!is.na(type_bio))
-
-# Agrégation par année, transect et type bio
-stats_typebio <- quad_long %>%
-  group_by(Année, id_transect, type_bio, id_sous_unité) %>%
-  summarise(abundance_q = sum(presence), .groups = "drop") %>%
-  group_by(Année, id_transect, type_bio) %>%
-  summarise(
-    mean = mean(abundance_q),
-    sd = sd(abundance_q),
-    n = n(),
-    se = sd / sqrt(n),
-    .groups = "drop"
-  ) %>%
-  group_by(Année, id_transect) %>%
-  mutate(pourcentage = mean / sum(mean) * 100) %>%
-  ungroup() %>%
-  mutate(
-    IC_low = pmax(0, pourcentage - 1.96 * se),
-    IC_high = pourcentage + 1.96 * se
-  )
-
-# Graph type biologique
-
-stats_typebio <- stats_typebio %>% left_join(annotations, by = "id_transect")
-
-labels_typebio <- c(
-  "H" = "Hémicryptophytes", "T" = "Thérophytes", "G" = "Géophytes",
-  "C" = "Chaméphytes", "P" = "Phanérophytes", "B" = "Bryophytes"
-)
-
-# PRÉPARATION : On calcule les proportions totales par Année et Stade
-
-stats_empilees <- stats_typebio %>%
-  # Conversion des codes (H, T...) en noms complets pour la légende
-  mutate(type_bio_nom = recode(type_bio, !!!labels_typebio)) %>%
-  group_by(Année, stade) %>%
-  # Calcul explicite du pourcentage pour atteindre 100%
-  mutate(pourcentage_empile = (mean / sum(mean)) * 100) %>%
-  ungroup()
-
-# VISUALISATION AVEC VOTRE GAMME DE COULEURS
-p <- ggplot(stats_empilees, aes(x = as.factor(Année), y = pourcentage_empile, fill = type_bio_nom)) + 
-  geom_col(position = "stack") + 
-  facet_wrap(~ stade) + 
-  
-  # Utilisation de la palette Set3 (la gamme classique aux couleurs pastels)
-  scale_fill_brewer(palette = "Set3") + 
-  
-  theme_minimal() + 
-  labs(
-    title = paste("Évolution du pourcentage des types biologiques -", site),
-    x = "Année", 
-    y = "Pourcentage (%)", 
-    fill = "Type biologique"
-  ) +
-  theme(legend.position = "bottom")
-
-print(p)
-
-# Sauvegarde
-ggsave(filename = paste0(site, "_Indicateur_TypeBio_MultiAnnuel.jpg"),
-       plot = p, width = 12, height = 8, dpi = 300)
-
-# Mise à jour pédagogique du Viewer
-etape_types_bio <- "
-<div class='etape' style='border-left: 6px solid #e67e22; margin-top: 20px;'>
-  <p style='color: #e67e22; margin-top:0;'><b>📊 ÉTAPE 5 : Analyse des Types Biologiques (Raunkiaer)</b></p>
-  <p>Visualisation de la stratégie de survie et de la structure de la végétation.</p>
-</div>
-
-<div class='etape' style='border-left: 6px solid #e67e22; background-color: #fff9f4; margin-top: 15px;'>
-  <p style='color: #e67e22; margin-top:0;'><b>💡 COMMENT INTERPRÉTER CES BARRES ?</b></p>
-  <ul style='line-height: 1.6;'>
-    <li><b>Composition relative :</b> Chaque colonne représente 100% de la végétation pour une année donnée. Les changements de hauteur des blocs colorés montrent le remplacement des stratégies biologiques.</li>
-    <li><b>Phanérophytes (Bleu) :</b> Une augmentation de leur part indique souvent une fermeture du milieu (embroussaillement).</li>
-    <li><b>Thérophytes (Orange) :</b> Une diminution peut traduire une perte de milieux ouverts ou perturbés (succession écologique).</li>
-    <li><b>Comparaison :</b> Observez si la structure de la zone <i>'À restaurer'</i> se rapproche de celle du <i>'Témoin'</i> au fil des années.</li>
-  </ul>
-</div>"
-
-historique_guide <- paste0(historique_guide, etape_types_bio)
-pause_viewer(historique_guide)
-
-  ## 2.5 EXPLORATION MULTIDIMENSIONNEL ----
- 
-       ### 2.5.1 AFC ----
-
-# PRÉPARATION DES DONNÉES (Création de l'objet)
+# PRÉPARATION
 data_afc_detail <- Data %>%
-  mutate(id_unique_q = id,
-         id_groupe_ellipse = paste(id_transect, Année, sep = "_")) %>%
+  mutate(id_unique_q = id, id_groupe_ellipse = paste(id_transect, Année, sep = "_")) %>%
   left_join(annotations_all[[site]], by = "id_transect")
 
 # CALCUL AFC
 data_numeric_only <- data_afc_detail %>% 
   dplyr::select(-matches("EIVEres|Taxon|UUID|AccordingTo|id_groupe|stade|Année|id_transect|id_sous_unité|id_unique_q")) %>% 
   dplyr::select(where(is.numeric))
-
-lignes_valides <- rowSums(data_numeric_only) > 0
-data_afc_clean <- data_afc_detail[lignes_valides, ]
-matrice_afc_q <- as.data.frame(data_numeric_only[lignes_valides, ])
-rownames(matrice_afc_q) <- data_afc_clean$id_unique_q
-
+matrice_afc_q <- as.data.frame(data_numeric_only[rowSums(data_numeric_only) > 0, ])
+rownames(matrice_afc_q) <- data_afc_detail$id_unique_q[rowSums(data_numeric_only) > 0]
 res_afc_q <- CA(matrice_afc_q, graph = FALSE)
 
-# PRÉPARATION DES COORDONNÉES ET VECTEURS
-coord_quadrats <- data.frame(
-  Dim.1 = as.numeric(res_afc_q$row$coord[, 1]), 
-  Dim.2 = as.numeric(res_afc_q$row$coord[, 2]), 
-  id_unique_q = rownames(res_afc_q$row$coord)
-) %>%
-  left_join(data_afc_clean %>% select(id_unique_q, id_groupe_ellipse, stade, Année, id_transect), by = "id_unique_q") %>%
+# COORDONNÉES
+coord_quadrats <- data.frame(Dim.1 = res_afc_q$row$coord[, 1], Dim.2 = res_afc_q$row$coord[, 2], id_unique_q = rownames(res_afc_q$row$coord)) %>%
+  left_join(data_afc_detail %>% dplyr::select(id_unique_q, id_groupe_ellipse, stade, Année, id_transect), by = "id_unique_q") %>% 
   filter(!is.na(stade))
 
 centres_ellipses <- coord_quadrats %>% 
   group_by(id_groupe_ellipse) %>% 
-  summarise(cx = mean(Dim.1), cy = mean(Dim.2), Année = first(Année), 
-            id_transect = first(id_transect), stade = first(stade), .groups = "drop")
+  summarise(cx = mean(Dim.1), cy = mean(Dim.2), stade = first(stade), Année = first(Année), id_transect = first(id_transect), .groups = "drop")
 
-coords_especes <- data.frame(nom = rownames(res_afc_q$col$coord), Dim.1 = as.numeric(res_afc_q$col$coord[, 1]), Dim.2 = as.numeric(res_afc_q$col$coord[, 2]), contrib = as.numeric(res_afc_q$col$contrib[, 1]) + as.numeric(res_afc_q$col$contrib[, 2]))
-top_15_especes <- coords_especes[order(-coords_especes$contrib), ][1:15, ]
+coords_especes <- data.frame(nom = rownames(res_afc_q$col$coord), Dim.1 = res_afc_q$col$coord[, 1], Dim.2 = res_afc_q$col$coord[, 2], contrib = res_afc_q$col$contrib[, 1] + res_afc_q$col$contrib[, 2])
 
-cols_especes <- setdiff(names(data_numeric_only), names(Dengler %>% select(starts_with("EIVEres"))))
-data_num_sync <- data_afc_clean %>%
-  pivot_longer(cols = all_of(cols_especes), names_to = "TaxonConcept", values_to = "abondance") %>%
-  filter(abondance > 0) %>%
-  left_join(Dengler %>% select(TaxonConcept, starts_with("EIVEres")), by = "TaxonConcept") %>%
-  group_by(id_unique_q) %>%
-  summarise(across(starts_with("EIVEres"), ~weighted.mean(., abondance, na.rm = TRUE))) %>%
-  filter(id_unique_q %in% rownames(res_afc_q$row$coord)) %>%
-  arrange(match(id_unique_q, rownames(res_afc_q$row$coord))) %>% select(-id_unique_q)
-
-# Pour projeter les EIVE
-cols_especes <- setdiff(names(data_numeric_only), names(Dengler %>% select(starts_with("EIVEres"))))
-data_num_sync <- data_afc_clean %>%
-  pivot_longer(cols = all_of(cols_especes), names_to = "TaxonConcept", values_to = "abondance") %>%
-  filter(abondance > 0) %>%
-  left_join(Dengler %>% select(TaxonConcept, starts_with("EIVEres")), by = "TaxonConcept") %>%
-  group_by(id_unique_q) %>%
-  summarise(across(starts_with("EIVEres"), ~weighted.mean(., abondance, na.rm = TRUE))) %>%
-  filter(id_unique_q %in% rownames(res_afc_q$row$coord)) %>%
-  arrange(match(id_unique_q, rownames(res_afc_q$row$coord))) %>% 
-  # Sélection stricte des optimums principaux uniquement
-  select(id_unique_q, `EIVEres-M`, `EIVEres-N`, `EIVEres-R`, `EIVEres-L`, `EIVEres-T`) %>%
-  select(-id_unique_q)
-
-# Calcul des vecteurs avec envfit
-env_results <- envfit(res_afc_q$row$coord, data_num_sync, permutations = 999)
-vectors <- as.data.frame(scores(env_results, display = "vectors"))
-vectors$pvals <- env_results$vectors$pvals
-vectors$label <- rownames(vectors)
-colnames(vectors)[1:2] <- c("Dim1", "Dim2")
-
-# Filtrage significatif
-vectors <- vectors[vectors$pvals < 0.05, ]
-
-# Renommage explicite
-vectors$label[vectors$label == "EIVEres-M"] <- "Humidité (M)"
-vectors$label[vectors$label == "EIVEres-N"] <- "Fertilité (N)"
-vectors$label[vectors$label == "EIVEres-R"] <- "pH (R)"
-vectors$label[vectors$label == "EIVEres-L"] <- "Luminosité (L)"
-vectors$label[vectors$label == "EIVEres-T"] <- "Température (T)"
-
-# VISUALISATIONS
-style_annees <- scale_linetype_manual(values = c("2025" = "solid", "2026" = "dashed"), name = "Année")
-
-custom_color <- scale_color_manual(
-  values = couleurs_stade, 
-  name = "Stades de restauration"
+nb_esp_str <- rstudioapi::showPrompt(
+  title = "Paramètre AFC", 
+  message = "Combien d'espèces contributives afficher sur le graphique ?", 
+  default = ""
 )
 
-custom_linetype <- scale_linetype_manual(
-  values = c("2025" = "solid", "2026" = "dashed"), 
-  name = "Année", # IMPORTANT : doit être identique au scale_color
-  guide = guide_legend(override.aes = list(color = "black")) # Force le rendu des traits
-)
+top_especes <- coords_especes[order(-coords_especes$contrib), ][1:min(nb_top, nrow(coords_especes)), ]
 
+# VECTEURS EIVE
+cols_eive_names <- names(Dengler %>% dplyr::select(dplyr::starts_with("EIVEres")))
+data_num_sync <- data_afc_detail %>%
+  pivot_longer(cols = setdiff(names(data_numeric_only), cols_eive_names), names_to = "TaxonConcept", values_to = "abondance") %>%
+  filter(abondance > 0) %>% left_join(Dengler %>% dplyr::select(TaxonConcept, dplyr::starts_with("EIVEres")), by = "TaxonConcept") %>%
+  group_by(id_unique_q) %>% summarise(across(dplyr::starts_with("EIVEres"), ~weighted.mean(., abondance, na.rm = TRUE))) %>%
+  filter(id_unique_q %in% rownames(res_afc_q$row$coord)) %>% 
+  column_to_rownames("id_unique_q") %>% dplyr::select(!matches("\\.n$|\\.nw3$")) %>% na.omit()
 
-# P1 : Relevés
-p1 <- ggplot(coord_quadrats, aes(x = Dim.1, y = Dim.2)) + 
+env_results <- envfit(res_afc_q$row$coord[rownames(data_num_sync), ], data_num_sync, permutations = 999)
+vectors <- as.data.frame(scores(env_results, display = "vectors"))[env_results$vectors$pvals < 0.05, ]
+vectors$label <- rownames(vectors); colnames(vectors)[1:2] <- c("Dim1", "Dim2")
+vectors$label <- recode(vectors$label, "EIVEres-M"="Humidité (M)", "EIVEres-N"="Fertilité (N)", "EIVEres-R"="pH (R)", "EIVEres-L"="Luminosité (L)", "EIVEres-T"="Température (T)")
+
+###  GESTION TYPES BIOLOGIQUES 
+
+#  Fusion automatique A/B -> P
+baseflor_agreg <- baseflor %>% 
+  mutate(type_brut = toupper(str_sub(TYPE_BIOLOGIQUE, 1, 1))) %>%
+  mutate(type_bio = case_when(type_brut %in% c("A", "B") ~ "P", TRUE ~ type_brut))
+
+# Saisie interactive manquants
+cols_especes <- setdiff(names(data_numeric_only), cols_eive_names)
+manquants_bf <- setdiff(cols_especes, baseflor_agreg$NOM_SCIENTIFIQUE)
+
+if (length(manquants_bf) > 0) {
+  html_manquants <- paste0(
+    "<h4>⚠️ Taxons manquants détectés</h4>",
+    "<p>Les espèces suivantes n'ont pas de type biologique défini :</p><ul><li>", 
+    paste(manquants_bf, collapse = "</li><li>"), "</li></ul>",
+    "<p><i>Veuillez les renseigner dans la fenêtre qui va apparaître.</i></p>"
+  )
+  pause_viewer(html_manquants) # Pause pour lecture
+  
+  # Boucle de saisie
+  for (sp in manquants_bf) {
+    reponse <- rstudioapi::showPrompt("Assignation", paste0("Type pour '", sp, "' (H, T, G, C, P, B) :"), "")
+    if (!is.null(reponse) && str_trim(reponse) != "") {
+      baseflor_agreg <- bind_rows(baseflor_agreg, data.frame(NOM_SCIENTIFIQUE = sp, type_bio = toupper(str_trim(reponse))))
+    }
+  }
+}
+
+# Reconstruction dynamique des données (Élimine les résidus)
+data_types_calcules <- data_afc_detail %>% 
+  pivot_longer(cols = all_of(cols_especes), names_to = "NOM_SCIENTIFIQUE", values_to = "abondance") %>%
+  filter(abondance > 0) %>% 
+  left_join(baseflor_agreg %>% dplyr::select(NOM_SCIENTIFIQUE, type_bio), by = "NOM_SCIENTIFIQUE") %>%
+  filter(!is.na(type_bio)) %>% 
+  group_by(id_unique_q, type_bio) %>% 
+  summarise(sum_abund = sum(abondance), .groups = "drop") %>%
+  pivot_wider(names_from = type_bio, values_from = sum_abund, values_fill = 0)
+
+# Affichage tableau récapitulatif
+tableau_types_bio <- data_types_calcules %>% column_to_rownames("id_unique_q")
+print(head(tableau_types_bio))
+
+# VECTEURS BIO
+matrice_types_afc <- tableau_types_bio %>% dplyr::select(any_of(c("P", "T", "C", "G", "H", "B"))) %>% na.omit()
+env_bio <- envfit(res_afc_q$row$coord[rownames(matrice_types_afc), ], matrice_types_afc, permutations = 999)
+vectors_sig <- as.data.frame(scores(env_bio, display = "vectors"))[env_bio$vectors$pvals < 0.05, ]
+vectors_sig$label <- rownames(vectors_sig); colnames(vectors_sig)[1:2] <- c("Dim1", "Dim2")
+vectors_sig$label <- recode(vectors_sig$label, "B"="Bryophytes", "P"="Phanérophytes", "T"="Thérophytes", "C"="Chamaéphytes", "G"="Géophytes", "H"="Hémicryptophytes")
+
+### VISUALISATION -
+label_x <- paste0("Dim.1 (", round(res_afc_q$eig[1, 2], 1), " %)")
+label_y <- paste0("Dim.2 (", round(res_afc_q$eig[2, 2], 1), " %)")
+
+p_afc <- ggplot(coord_quadrats, aes(x = Dim.1, y = Dim.2)) + 
+  geom_hline(yintercept = 0, color = "gray50", linewidth = 0.3, alpha = 0.8) +
+  geom_vline(xintercept = 0, color = "gray50", linewidth = 0.3, alpha = 0.8) +
   geom_point(aes(color = stade), size = 2.5, alpha = 0.5) + 
-  stat_ellipse(aes(group = id_groupe_ellipse, color = stade, linetype = as.factor(Année)), level = 0.95, type = "norm", linewidth = 0.8) +
-  geom_point(data = centres_ellipses, aes(x = cx, y = cy, fill = stade), shape = 23, size = 5, color = "black", stroke = 1.5, show.legend = FALSE) +
-  geom_text_repel(data = centres_ellipses, aes(x = cx, y = cy, label = paste0(id_transect, "-", Année)), fontface = "bold") +
-  scale_color_manual(values = couleurs_stade, name = "Stades de restauration") + 
-  scale_fill_manual(values = couleurs_stade, name = "Stades de restauration") +
-  style_annees + 
-  custom_linetype +
+  stat_ellipse(aes(group = id_groupe_ellipse, color = stade, linetype = as.factor(Année)), 
+               level = 0.95, type = "norm", linewidth = 0.8) +
+  geom_point(data = centres_ellipses, aes(x = cx, y = cy, fill = stade), 
+             shape = 23, size = 5, color = "black", stroke = 1.5, show.legend = FALSE) +
+  geom_text_repel(data = centres_ellipses, aes(x = cx, y = cy, label = paste0(id_transect, "-", Année)), 
+                  fontface = "bold") +
+  scale_color_manual(values = couleurs_stade, name = "Stade de restauration") + 
+  scale_fill_manual(values = couleurs_stade, name = "Stade de restauration") +
+  guides(linetype = guide_legend(title = "Année", keywidth = 3)) +
   theme_minimal() + 
-  theme(legend.key.width = unit(3, "line")) +
-  guides(linetype = guide_legend(override.aes = list(linetype = c("solid", "dashed")))) +
-  labs(title = "AFC : Répartition des relevés",
-       x = paste0("Dim.1 (", round(res_afc_q$eig[1, 2], 1), " %)"),
-       y = paste0("Dim.2 (", round(res_afc_q$eig[2, 2], 1), " %)")
-  )
+  labs(title = "AFC : Répartition", x = label_x, y = label_y)
 
-# P2 : Gradients
-p2 <- ggplot() + 
-  stat_ellipse(data = coord_quadrats, aes(x = Dim.1, y = Dim.2, color = stade, group = id_groupe_ellipse, linetype = as.factor(Année)), level = 0.95, type = "norm", linewidth = 0.8) +
-  geom_segment(data = vectors, aes(x = 0, y = 0, xend = Dim1, yend = Dim2), arrow = arrow(length = unit(0.2, "cm")), color = "black", linewidth = 0.8) +
-  geom_text_repel(data = vectors, aes(x = Dim1, y = Dim2, label = label), fontface = "bold") +
-  scale_color_manual(values = couleurs_stade, name = "Stades de restauration") +
-  scale_linetype_manual(values = c("2025" = "solid", "2026" = "dashed"), name = "Année") +
-  theme_minimal() +
-  theme(legend.key.width = unit(3, "line")) +
-  labs(title = "Gradients environnementaux",
-       x = paste0("Dim.1 (", round(res_afc_q$eig[1, 2], 1), " %)"),
-       y = paste0("Dim.2 (", round(res_afc_q$eig[2, 2], 1), " %)")
-  )
-
-# P3 : Espèces
-p3 <- ggplot(top_15_especes, aes(x = Dim.1, y = Dim.2)) + 
-  stat_ellipse(data = coord_quadrats, aes(x = Dim.1, y = Dim.2, color = stade, group = id_groupe_ellipse, linetype = as.factor(Année)), level = 0.95, type = "norm", linewidth = 0.8) +
-  geom_segment(aes(x = 0, y = 0, xend = Dim.1, yend = Dim.2), arrow = arrow(length = unit(0.2, "cm")), color = "black", linewidth = 0.8) +
-  geom_text_repel(aes(label = nom), fontface = "bold", size = 3.5) +
-  scale_color_manual(values = couleurs_stade) +
-  style_annees + 
-  custom_color + 
-  custom_linetype +
+p_esp <- ggplot() + 
+  geom_hline(yintercept = 0, color = "gray50", linewidth = 0.3, alpha = 0.8) +
+  geom_vline(xintercept = 0, color = "gray50", linewidth = 0.3, alpha = 0.8) +
+  stat_ellipse(data = coord_quadrats, aes(Dim.1, Dim.2, color = stade, group = id_groupe_ellipse, linetype = as.factor(Année)), level = 0.95, linewidth = 0.8) +
+  scale_color_manual(values = couleurs_stade, name = "Stade de restauration") +
+  guides(linetype = guide_legend(title = "Année", keywidth = 3)) +
+  geom_point(data = top_especes, aes(Dim.1, Dim.2), color = "black", size = 2) +
+  geom_text_repel(data = top_especes, aes(Dim.1, Dim.2, label = nom), fontface = "bold", size = 3) +
   theme_minimal() + 
-  theme(legend.key.width = unit(3, "line")) +
-  labs(title = "Top 15 Espèces",
-       x = paste0("Dim.1 (", round(res_afc_q$eig[1, 2], 1), " %)"),
-       y = paste0("Dim.2 (", round(res_afc_q$eig[2, 2], 1), " %)")
-  )
+  labs(x = label_x, y = label_y, title = paste0("a) Espèces (Top ", nrow(top_especes), ")"))
 
-print(p1); print(p2); print(p3)
+p_bio <- ggplot() + 
+  geom_hline(yintercept = 0, color = "gray50", linewidth = 0.3, alpha = 0.8) +
+  geom_vline(xintercept = 0, color = "gray50", linewidth = 0.3, alpha = 0.8) +
+  stat_ellipse(data = coord_quadrats, aes(Dim.1, Dim.2, color = stade, group = id_groupe_ellipse, linetype = as.factor(Année)), level = 0.95, linewidth = 0.8) +
+  scale_color_manual(values = couleurs_stade, name = "Stade de restauration") +
+  guides(linetype = guide_legend(title = "Année", keywidth = 3)) +
+  geom_segment(data = vectors_sig, aes(x = 0, y = 0, xend = Dim1, yend = Dim2), arrow = arrow(length = unit(0.2, "cm")), color = "black", linewidth = 1) +
+  geom_text_repel(data = vectors_sig, aes(x = Dim1, y = Dim2, label = label), color = "black", fontface = "bold") +
+  theme_minimal() + labs(x = label_x, y = label_y, title = "b) Types biologiques")
 
-save_graph(p1, paste0("AFC _ ", site))
-save_graph(p2, paste0("AFC avec projection EIVE _ ", site))
-save_graph(p3, paste0("AFC avec projection espèces_ ", site))
+p_env <- ggplot() + 
+  geom_hline(yintercept = 0, color = "gray50", linewidth = 0.3, alpha = 0.8) +
+  geom_vline(xintercept = 0, color = "gray50", linewidth = 0.3, alpha = 0.8) +
+  stat_ellipse(data = coord_quadrats, aes(Dim.1, Dim.2, color = stade, group = id_groupe_ellipse, linetype = as.factor(Année)), level = 0.95, linewidth = 0.8) +
+  scale_color_manual(values = couleurs_stade, name = "Stade de restauration") +
+  guides(linetype = guide_legend(title = "Année", keywidth = 3)) +
+  geom_segment(data = vectors, aes(x = 0, y = 0, xend = Dim1, yend = Dim2), arrow = arrow(length = unit(0.2, "cm")), color = "black", linewidth = 1) +
+  geom_text_repel(data = vectors, aes(x = Dim1, y = Dim2, label = label), color = "black", fontface = "bold") +
+  theme_minimal() + labs(x = label_x, y = label_y, title = "c) EIVE")
 
-# AJOUT DE L'ÉTAPE 5 DANS LE VIEWER
-historique_guide <- paste0(historique_guide, "
-  <div class='etape etape-5' style='border-left: 6px solid #8e44ad; background-color: #f9f4fb; margin-top: 20px;'>
-    <p style='color: #8e44ad; margin-top:0;'><b>🎯 ÉTAPE 5 : Synthèse des résultats</b></p>
-    <p>L'analyse multivariée (AFC) est maintenant terminée. Vous pouvez observer les trajectoires de restauration sur les graphiques ci-dessus. 
-    Les données ont été exportées dans le dossier <code>graphs_", site, "</code>.</p>
-  </div>")
+graphique_combine <- (p_esp | p_bio | p_env) + plot_layout(guides = "collect", ncol = 3) & 
+  theme(legend.position = "bottom") 
 
-# AJOUT DES BLOCS D'EXPLICATION (Interprétations)
-interpr_afc <- "
-<div style='background-color: #fdf2e9; border: 1px solid #d35400; padding: 15px; border-radius: 5px; margin-top: 15px;'>
-  <h4 style='color: #d35400; margin-top:0;'>🔍 Comment interpréter vos graphiques AFC ?</h4>
-  <p>Pour lire ces trois graphiques ensemble, gardez cette logique en tête :</p>
-  <ul>
-    <li><b>Répartition (P1) :</b> Comparez les ellipses 2026 (pointillées) à 2025 (pleines). Un glissement vers une autre ellipse indique un changement de composition floristique.</li>
-    <li><b>Gradients (P2) :</b> Les flèches indiquent la direction des variables (ex: lumière, humidité). Plus la flèche est longue, plus la variable structure la végétation.</li>
-    <li><b>Espèces (P3) :</b> Elles sont positionnées selon leurs affinités. Une espèce proche d'un barycentre de transect est typique de ce milieu.</li>
-  </ul>
-</div>"
+print(p_afc); print(graphique_combine)
 
-historique_guide <- paste0(historique_guide, interpr_afc)
-pause_viewer(historique_guide)
-
+ggsave(paste0("graphs_", site, "/AFC_", site, ".png"), p_afc, width = 10, height = 8, dpi = 300)
+ggsave(paste0("graphs_", site, "/AFC_Projection_", site, ".png"), graphique_combine, width = 20, height = 7, dpi = 300)
 
 
       ### 2.5.2 PERMANOVA ----
