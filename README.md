@@ -7,7 +7,7 @@ Ce dépôt contient le script et les données associés au travail réalisé dan
 ## 📂 Contenu du dépôt
 
 - `Script_Données/` : Contient les jeux de données bruts (`Baseflor.xlsx`, `Data.xlsx`, `Dengler.xlsx`) ainsi que le script R (`Script.R`).
-                                      -> Le jeu de données ici est celui du site de Fosse (66), il est donné à titre d'exmple si vous souhaitez tester le script. 
+#### -> Le jeu de données ici est celui du site de Fosse (66), il est donné à titre d'exmple si vous souhaitez tester le script. 
 - `Graphs_Fosse/` : Regroupe les sorties graphiques générées par l'analyse pour le site de Fosse (66).
 
 ## 🧪 Analyses effectuées par le script
