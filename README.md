@@ -1,12 +1,13 @@
 # Analyse et suivi des communautés végétales - Mémoire M1
 
-Ce dépôt contient le script et les données associés au travail réalisé dans le cadre de mon Mémoire de Master 1. L'objectif est l'analyse des dynamiques de restauration des communautés végétales sur le site de Fosse.
+
+Ce dépôt contient le script et les données associés au travail réalisé dans le cadre de mon Mémoire de Master 1, sur le protocole de suivis des communautés végétales testé par le CEN Occitanie.L'objectif étant de proposer une démarche analytique complète, adaptée à la fois aux données produites par ce protocole et aux compétences des gestionnaires.
+
 
 ## 📂 Contenu du dépôt
 
-- `Script_Données/` : Contient les jeux de données bruts (`Baseflor.xlsx`, `Data.xlsx`, `Dengler.xlsx`) ainsi que le script R (`Script.R`) permettant l'analyse automatisée.
-- `Graphs_Fosse/` : Regroupe les sorties graphiques générées par l'analyse.
-- `Dendrogramme_Fosse.pdf` : Visualisation de la classification des communautés végétales.
+- `Script_Données/` : Contient les jeux de données bruts (`Baseflor.xlsx`, `Data.xlsx`, `Dengler.xlsx`) ainsi que le script R (`Script.R`).
+- `Graphs_Fosse/` : Regroupe les sorties graphiques générées par l'analyse pour le site de Fosse.
 
 ## 🛠 Fonctionnalités du script R
 
