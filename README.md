@@ -11,7 +11,7 @@ Ce dépôt contient le script et les données associés au travail réalisé dan
 - `Graphs_Fosse/` : Regroupe les sorties graphiques générées par l'analyse pour le site de Fosse (66).
 
 ## 📊 Préparation des données
-Si vous souhaitez appliquer ce protocole à d'autres sites, il est impératif de respecter le format des fichiers sources :
+Si vous souhaitez appliquer ces analyses à d'autres sites, il est impératif de respecter le format des fichiers sources :
 -  **Format :** Utilisez exclusivement le format `.xlsx`. Et renommez votre fichier `Data.xlsx.
 -  **Structure :** Vos fichiers doivent conserver strictement la même structure en format large que le fichier modèle fourni dans ce dépôt.
 - <img width="1212" height="352" alt="image" src="https://github.com/user-attachments/assets/257c445d-b64e-4f59-8cf6-98b4d8b0926c" />
