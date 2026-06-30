@@ -888,7 +888,7 @@ k_opt <- k_test[which.max(ch_scores)]
 # Clusters finaux
 df_filtre$cluster <- cutree(hc, k = k_opt)
 
-# Calcul du tableau croisé des proportions de chaque stade ou année dans les clusters proposé par l'indice de CH
+# Calcul du tableau croisé des proportions de chaque stade dans les clusters proposé par l'indice de CH
 tab_prop <- prop.table(table(df_filtre$cluster, df_filtre$stade), 1)
 
 # Génération dynamique du tableau
@@ -918,13 +918,9 @@ etape_beta <- paste0("
 historique_guide <- paste0(historique_guide, etape_beta)
 pause_viewer(historique_guide)
 
-# Si on veut tester le clustering selon l'année aussi 
-# 1. Calcul du tableau croisé : Cluster vs Année
-# On récupère les années uniques dynamiquement pour les en-têtes
+# Calcul du tableau croisé des proportions de chaque année dans les clusters proposé par l'indice de CH
 annees <- sort(unique(df_filtre$Année))
 tab_prop_annee <- prop.table(table(df_filtre$cluster, df_filtre$Année), 1)
-
-# 2. Génération dynamique des lignes du tableau HTML
 lignes_html_annee <- ""
 for(i in 1:nrow(tab_prop_annee)) {
   row_data <- tab_prop_annee[i, ]
@@ -934,8 +930,7 @@ for(i in 1:nrow(tab_prop_annee)) {
                               "</tr>")
 }
 
-# 3. Création du bloc HTML pour l'année
-etape_annee <- paste0(
+                          etape_annee <- paste0(
   "<div class='etape' style='border-left: 6px solid #2980b9; background-color: #ebf5fb; padding: 15px; margin-top: 20px;'>",
   "<p style='color: #2980b9; margin-top:0;'><b>🗓️ ÉTAPE 3bis : Diversité Bêta (Répartition par Année)</b></p>",
   "<p>Répartition des relevés par cluster vs Année :</p>",
@@ -958,12 +953,12 @@ pause_viewer(historique_guide)
 
 ### 2.4.1 AFC ET VECTEURS ----
 
-# PRÉPARATION
+# préparation données
 data_afc_detail <- Data %>%
   mutate(id_unique_q = id, id_groupe_ellipse = paste(id_transect, Année, sep = "_")) %>%
   left_join(annotations_all[[site]], by = "id_transect")
 
-# CALCUL AFC
+# calcul AFC
 data_numeric_only <- data_afc_detail %>% 
   dplyr::select(-matches("EIVEres|Taxon|UUID|AccordingTo|id_groupe|stade|Année|id_transect|id_sous_unité|id_unique_q")) %>% 
   dplyr::select(where(is.numeric))
@@ -971,7 +966,7 @@ matrice_afc_q <- as.data.frame(data_numeric_only[rowSums(data_numeric_only) > 0,
 rownames(matrice_afc_q) <- data_afc_detail$id_unique_q[rowSums(data_numeric_only) > 0]
 res_afc_q <- CA(matrice_afc_q, graph = FALSE)
 
-# COORDONNÉES
+# on récupère les coordonnées
 coord_quadrats <- data.frame(Dim.1 = res_afc_q$row$coord[, 1], Dim.2 = res_afc_q$row$coord[, 2], id_unique_q = rownames(res_afc_q$row$coord)) %>%
   left_join(data_afc_detail %>% dplyr::select(id_unique_q, id_groupe_ellipse, stade, Année, id_transect), by = "id_unique_q") %>% 
   filter(!is.na(stade))
@@ -1005,14 +1000,14 @@ vectors <- as.data.frame(scores(env_results, display = "vectors"))[env_results$v
 vectors$label <- rownames(vectors); colnames(vectors)[1:2] <- c("Dim1", "Dim2")
 vectors$label <- recode(vectors$label, "EIVEres-M"="Humidité (M)", "EIVEres-N"="Fertilité (N)", "EIVEres-R"="pH (R)", "EIVEres-L"="Luminosité (L)", "EIVEres-T"="Température (T)")
 
-###  GESTION TYPES BIOLOGIQUES 
+#  GESTION TYPES BIOLOGIQUES 
 
-#  Fusion automatique A/B -> P
+#  Fusion automatique A/B -> P (car phanérophytes ont deux catégories dans Baseflor mais nous on simplifie ici)
 baseflor_agreg <- baseflor %>% 
   mutate(type_brut = toupper(str_sub(TYPE_BIOLOGIQUE, 1, 1))) %>%
   mutate(type_bio = case_when(type_brut %in% c("A", "B") ~ "P", TRUE ~ type_brut))
 
-# Saisie interactive manquants
+# Vérifie les types biologiques manquants
 cols_especes <- setdiff(names(data_numeric_only), cols_eive_names)
 manquants_bf <- setdiff(cols_especes, baseflor_agreg$NOM_SCIENTIFIQUE)
 
@@ -1025,7 +1020,7 @@ if (length(manquants_bf) > 0) {
   )
   pause_viewer(html_manquants) # Pause pour lecture
   
-  # Boucle de saisie
+  # Boucle de saisie des types biologiques manquants 
   for (sp in manquants_bf) {
     reponse <- rstudioapi::showPrompt("Assignation", paste0("Type pour '", sp, "' (H, T, G, C, P, B) :"), "")
     if (!is.null(reponse) && str_trim(reponse) != "") {
@@ -1034,7 +1029,7 @@ if (length(manquants_bf) > 0) {
   }
 }
 
-# Reconstruction dynamique des données (Élimine les résidus)
+# Obn ajoute les nouvelles données 
 data_types_calcules <- data_afc_detail %>% 
   pivot_longer(cols = all_of(cols_especes), names_to = "NOM_SCIENTIFIQUE", values_to = "abondance") %>%
   filter(abondance > 0) %>% 
@@ -1048,14 +1043,13 @@ data_types_calcules <- data_afc_detail %>%
 tableau_types_bio <- data_types_calcules %>% column_to_rownames("id_unique_q")
 print(head(tableau_types_bio))
 
-# VECTEURS BIO
 matrice_types_afc <- tableau_types_bio %>% dplyr::select(any_of(c("P", "T", "C", "G", "H", "B"))) %>% na.omit()
 env_bio <- envfit(res_afc_q$row$coord[rownames(matrice_types_afc), ], matrice_types_afc, permutations = 999)
 vectors_sig <- as.data.frame(scores(env_bio, display = "vectors"))[env_bio$vectors$pvals < 0.05, ]
 vectors_sig$label <- rownames(vectors_sig); colnames(vectors_sig)[1:2] <- c("Dim1", "Dim2")
 vectors_sig$label <- recode(vectors_sig$label, "B"="Bryophytes", "P"="Phanérophytes", "T"="Thérophytes", "C"="Chamaéphytes", "G"="Géophytes", "H"="Hémicryptophytes")
 
-### VISUALISATION -
+### Maintenant on fait les graphs
 label_x <- paste0("Dim.1 (", round(res_afc_q$eig[1, 2], 1), " %)")
 label_y <- paste0("Dim.2 (", round(res_afc_q$eig[2, 2], 1), " %)")
 
@@ -1183,9 +1177,9 @@ pause_viewer(historique_guide)
 
    
 
-    ### 2.4.3 TABLEAU FREQUENCE RELATIVE  ----
-
-# 1. On identifie les espèces strictes (ce bloc reste inchangé)
+    ### 2.4.3 TABLEAU FREQUENCE RELATIVE ESPECES DOMINANTES ----
+                   
+# On identifie les espèces qui sont présentes dans tous les transects chaque année
 data_long_raw <- Data %>%
   filter(id_transect %in% trans_cible) %>%
   pivot_longer(cols = all_of(colonnes_especes), names_to = "espece", values_to = "valeur") %>%
@@ -1198,27 +1192,22 @@ especes_strictes <- data_long_raw %>%
   filter(n_combinaisons == 6) %>% 
   pull(espece)
 
-# 2. On génère le tableau final en sélectionnant les colonnes strictes directement
+# On génère le tableau final en sélectionnant les espèces dominantes directement
 tableau_final <- Data %>%
   filter(id_transect %in% trans_cible) %>%
-  # On ne garde que les espèces strictes
   select(id_transect, Année, all_of(especes_strictes)) %>%
-  # On passe en long pour calculer les fréquences
-  pivot_longer(cols = all_of(especes_strictes), names_to = "espece", values_to = "valeur") %>%
+   pivot_longer(cols = all_of(especes_strictes), names_to = "espece", values_to = "valeur") %>%
   group_by(espece, id_transect, Année) %>%
   summarise(freq = sum(valeur > 0) / 50, .groups = "drop") %>%
-  # On repasse en large
   mutate(col_name = paste(id_transect, Année, sep = "_")) %>%
   select(espece, col_name, freq) %>%
   pivot_wider(names_from = col_name, values_from = freq, values_fill = 0) %>%
-  # Calcul des totaux
-  mutate(
+   mutate(
     F1_Total = (F1_2025 + F1_2026) / 2,
     F2_Total = (F2_2025 + F2_2026) / 2,
     F3_Total = (F3_2025 + F3_2026) / 2
   ) %>%
   arrange(desc(F1_Total)) %>%
-  # Formatage final
   mutate(across(-espece, ~ paste0(round(. * 100, 0), "%")))
 
 print(tableau_final)
