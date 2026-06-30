@@ -35,11 +35,11 @@ library(dendextend)
 library(tidyselect) 
 library(patchwork)
 
+# Pour éviter les confusions de fonctions présentes dans plusieurs paskages
 select <- dplyr::select
 filter <- dplyr::filter
 
-# Rafraîchit le Viewer avec le contenu HTML + un bouton "Continuer" collé en bas
-
+# Rafraîchir le Viewer avec le contenu HTML + un bouton "Continuer" en bas
 rafraichir_viewer <- function(texte_html, avec_bouton = FALSE) {
   bouton <- if (avec_bouton) "
   <div id='bouton-wrapper' style='
@@ -87,14 +87,9 @@ rafraichir_viewer <- function(texte_html, avec_bouton = FALSE) {
 
 valeur_recuperee <<- ""
 
-# Fonction pause viewver 
-
+# Fonction pause viewver pour afficher des résultats ou explications dans le viewer et que ça mette en pause le script le temps que l'utilisateur lise et appuie sur "Continuer"
 pause_viewer <- function(texte_html, champ_saisie = NULL) {
-  # 1. Nettoyage
   try(lapply(httpuv::listServers(), httpuv::stopServer), silent = TRUE)
-  
-  # 2. Structure HTML + Script qui attend le chargement
-  # On déplace l'assignation de l'onclick DANS un window.onload
   inject <- if (!is.null(champ_saisie)) {
     paste0("
       <div style='margin-top: 15px; padding: 10px; border-top: 2px solid #27ae60;'>
@@ -126,7 +121,6 @@ pause_viewer <- function(texte_html, champ_saisie = NULL) {
   writeLines(paste0("<meta charset='UTF-8'>", texte_html, bouton, inject), html_file, useBytes = TRUE)
   rstudioapi::viewer(html_file)
   
-# Serveur
   assign("valeur_recuperee", "", envir = .GlobalEnv)
   signal_recu <- FALSE
   serveur <- httpuv::startServer("127.0.0.1", 7894, list(
@@ -145,6 +139,7 @@ pause_viewer <- function(texte_html, champ_saisie = NULL) {
 
   ## 1.2 INITIALISATION DU GUIDE ÉVOLUTIF ----
 
+# Premier affichage dans le viewer pour démarrer et tout expliquer
 historique_guide <- "
 <html>
 <head>
@@ -167,7 +162,7 @@ historique_guide <- "
   <h2>📖 Mode d'emploi</h2>
   
   <div class='box-pdf'>
-    ⚠️ <b>RAPPEL IMPORTANT :</b> Avant de continuer, assurez-vous d'avoir bien lu la <b>note PDF</b> qui explique sous quel format précis doivent être vos données terrain et où télécharger les bases de données Baseflor et de Dengler <i>et al.</i> (2023).
+    ⚠️ <b>RAPPEL IMPORTANT :</b> Avant de continuer, assurez-vous d'avoir bien le bon format pour vos données de terrain et où télécharger les bases de données Baseflor et de Dengler <i>et al.</i> (2023).
   </div>
   
   <div class='box-files'>
@@ -194,12 +189,13 @@ historique_guide <- "
   </div>
 "
 
-# Premier affichage avec pause
+# Première pause
 pause_viewer(historique_guide)
 
 
   ## 1.3 CONFIGURATION INITIALE DU SITE ----
 
+# Demande le nom du site étudié avec une fenêtre pop-up : ça permettra de créer un fichier avec le nom du site pour enregistrer les graphs 
 site <- rstudioapi::showPrompt(
   title = "Configuration du Site",
   message = "Entrez le nom du site \n\n(ce nom sera affiché en titre sur vos graphiques) :",
@@ -210,6 +206,7 @@ site <- rstudioapi::showPrompt(
 
   ## 1.4 CHARGEMENT DES FICHIERS ----
 
+# Explication sur ce qu'il faut faire si les fichiers ne se chargent pas bien
 historique_guide <- paste0(historique_guide, "
   <div class='etape etape-3'>
     <p style='color: #d35400; margin-top:0;'><b>📂 ÉTAPE 3 : Chargement des documents </b></p>
@@ -229,6 +226,7 @@ historique_guide <- paste0(historique_guide, "
 ")
 pause_viewer(historique_guide)
 
+# Vérifie si les fichiers sont bien dans le même dossier que le script 
 fichiers_manquants <- c()
 if (!file.exists("Data.xlsx"))    fichiers_manquants <- c(fichiers_manquants, "Data.xlsx")
 if (!file.exists("baseflor.xlsx")) fichiers_manquants <- c(fichiers_manquants, "baseflor.xlsx")
@@ -249,10 +247,12 @@ if (length(fichiers_manquants) > 0) {
   stop("Analyse interrompue : Fichiers manquants dans le Working Directory.")
 }
 
+# Chargement des fichiers 
 Data     <- read_excel("Data.xlsx")
 baseflor <- read_excel("baseflor.xlsx")
 Dengler  <- read_excel("Dengler.xlsx", sheet = "mainTable")
 
+# Explications pour rappeler de vérifier la structure des données chargées, car le fichier peut-être chargé mais les données pas bien formatées
 historique_guide <- paste0(historique_guide, "
   <div class='etape' style='border-left: 6px solid #2980b9; background-color: #f0f7fb;'>
     <p style='color: #2980b9; margin-top:0;'><b>✅ Étape 3 validée : Données chargées avec succès.</b></p>
@@ -265,6 +265,7 @@ pause_viewer(historique_guide)
 
   ## 1.5 STANDARDISATION DES QUADRATS & VÉRIFICATION ----
 
+# Liste des unitdés d'échantillonnage
 quadrats_standard <- c(
   "0a","0b","0c","0d", "1a","1b","1c","1d", "2a","2b","2c","2d",
   "3a","3b","3c","3d", "4a","4b","4c","4d", "5a","5b","5c","5d",
@@ -273,27 +274,19 @@ quadrats_standard <- c(
   "12a","12d"
 )
 
+# Fonction pour vérifier et standardiser le nombre d'unités
 standardiser_site <- function(data) {
-  # 1. On nettoie tout de suite : on enlève les lignes sans année
   data <- data %>% filter(!is.na(Année))
-  
-  # Vérification des colonnes nécessaires
   stopifnot(all(c("Année", "id_transect", "id_sous_unité") %in% names(data)))
-  
-  # On récupère les années restantes (proprement)
   annees    <- unique(data$Année)
   transects <- unique(data$id_transect)
-  
   complet <- expand_grid(Année = annees, 
                          id_transect = transects, 
                          id_sous_unité = quadrats_standard)
-  
-  # Fusion
   data_std <- complet %>%
     left_join(data, by = c("Année", "id_transect", "id_sous_unité")) %>%
     mutate(across(where(is.numeric), ~ replace_na(.x, 0))) %>%
     mutate(id = paste(Année, id_transect, id_sous_unité, sep = "-"))
-  
   return(data_std)
 }
 
@@ -305,7 +298,7 @@ verif <- Data %>%
   group_by(Année, id_transect) %>%
   summarise(Nb_Sous_Quadrats = n(), .groups = "drop")
 
-# Génération d'un tableau HTML propre pour visualiser chaque transect par année
+# Génération d'un tableau HTML propre pour visualiser le nombre d'unités pour chaque transect par année
 liens_html <- verif %>%
   mutate(html = paste0(
     "<tr>
@@ -338,6 +331,7 @@ alerte_structure_excel <- "
   </div>
 "
 
+# Affichage et pause
 historique_guide <- paste0(historique_guide, "
   <div class='etape etape-4'>
     <p style='color: #e67e22; margin-top:0;'><b>📊 ÉTAPE 4 : Vérification du nombre d'unités par année — ", site, "</b></p>
@@ -348,13 +342,13 @@ historique_guide <- paste0(historique_guide, "
 ")
 pause_viewer(historique_guide)
 
-# Supprimer les listes et variables temporaires 
+# Supprimer les listes et variables temporaires (pour éviter d'avoir trop d'objets dans l'environnement)
 rm(verif, liens_html)
 
   ## 1.6 HARMONISATION TAXONOMIQUE ----
 
 
-# Dictionnaire des suggestions
+# Dictionnaire des suggestions de synonymes (faire tourner une fois et à compléter pour les fois suivantes si besoin)
 synonymes_connus <- list(
   "Vicia amphicarpa" = "Vicia sativa subsp. amphicarpa",
   "Herniaria cinerea" = "Herniaria hirsuta subsp. cinerea",
@@ -374,7 +368,7 @@ synonymes_connus <- list(
   "Vicia segetalis" = "Vicia sativa subsp. nigra"
 )
 
-# Fonction standardisation
+# Fonction standardisation (Dengler ne possède pas les noms d'auteurs et date contrairement aux données de terrain et Baseflor)
 nettoyer_nom_colonne <- function(nom_vector) {
   clean_func <- function(nom) {
     if (is.na(nom) | nom == "NA") return(NA_character_)
@@ -397,18 +391,18 @@ colnames(Data) <- nettoyer_nom_colonne(colnames(Data))
 baseflor$NOM_SCIENTIFIQUE <- nettoyer_nom_colonne(baseflor$NOM_SCIENTIFIQUE)
 Dengler$TaxonConcept <- nettoyer_nom_colonne(Dengler$TaxonConcept)
 
+# Vérifie les correspondances des noms entre les bases de données
 colonnes_meta <- c("id", "Année", "id_transect", "id_sous_unité")
 especes_terrain <- setdiff(colnames(Data), colonnes_meta)
 noms_bf <- unique(baseflor$NOM_SCIENTIFIQUE)
 noms_dg <- unique(Dengler$TaxonConcept)
-
 manquants_bf <- setdiff(especes_terrain, noms_bf)
 manquants_dg <- setdiff(especes_terrain, noms_dg)
 
 # Fonction détection noms incomplets
 est_incomplet <- function(noms) { str_detect(noms, "sp\\.?$|spp\\.?$|famille|genre|^[A-Z][a-z]+$") }
 
-# Affichage du bilan dans le Viewer
+# Affichage du bilan de noms manquants dans le Viewer
 bilan_taxo_html <- paste0(
   "<div style='display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0;'>",
   "  <div style='background-color: #fcf3f2; padding: 10px; border-radius: 4px; border: 1px solid #f5b7b1;'>",
@@ -417,7 +411,6 @@ bilan_taxo_html <- paste0(
   "    <b style='color: #8e44ad;'>🌍 Dengler</b><br>Reconnues : <b>", length(especes_terrain) - length(manquants_dg), "</b><br>Inconnues : <b style='color: #8e44ad;'>", length(manquants_dg), "</b></div>",
   "</div>"
 )
-
 historique_guide <- paste0(historique_guide, "<div class='etape etape-6' style='border-left: 6px solid #8e44ad; background-color: #fcfbfd;'>
     <p style='color: #8e44ad; margin-top:0; font-size: 1.1em;'><b>🔍 PARTIE 6 : Harmonisation taxonomique</b></p>", bilan_taxo_html, "</div>")
 pause_viewer(historique_guide)
@@ -493,9 +486,10 @@ rm(synonymes_connus, manquants_bf, manquants_dg, manquants_a_traiter,
 
   ## 1.7 STATUS DES TRANSECTS -----
 
-# Définissez ici VOTRE liste de choix autorisés
+# Définissez ici VOTRE liste de choix autorisés pour les stades de restauration 
 choix_stade <- c("Témoin", "À restaurer", "Restauré")
 
+# Enregistrement des stades pour certaines site (à compléter ou pas car une fenêtre pop-up apparaitra pour les autres sites)
 annotations_all <- list(
   "Fosse" = tibble(
     id_transect = c("F1", "F2", "F3"),
@@ -513,7 +507,7 @@ annotations_all <- list(
 
 annotations <- annotations_all[[site]]
 
-# Boucle de saisie avec menu déroulant
+# Boucle de saisie avec menu déroulant (fenêtre pop-up)
 cat("--- Modification des stades pour :", site, "---\n")
 
 for (i in 1:nrow(annotations)) {
@@ -540,6 +534,7 @@ for (i in 1:nrow(annotations)) {
 annotations_all[[site]] <- annotations
 cat("--- Mise à jour terminée pour le site", site, "---\n")
 
+# Choix des couleurs pour chaque stade
 couleurs_stade <- c(
   "Témoin"="#1b9e77",
   "À restaurer"="#e41a1c",
@@ -678,7 +673,7 @@ tableau_resultats <- do.call(rbind, lapply(names(resultats_analyse), function(g)
 }))
 
 
-# Génération du graphique avec légende ajustée
+# Génération du graphique 
 rarefaction_df <- bind_rows(lapply(names(resultats_analyse), function(g) {
   res <- resultats_analyse[[g]]
   parts <- strsplit(g, "_")[[1]]
@@ -737,12 +732,10 @@ rm(sous_data, mat, acc, mods, df_aic, html_aic, input_val)
 
 ## 2.2 RICHESSE SPECIFIQUE ----
 
-# Calcul de la Richesse Spécifique (S) uniquement
-# On utilise dplyr::select pour éviter les conflits et colSums pour la robustesse
+# Calcul de la Richesse Spécifique (S) 
 alpha_data <- Data %>%
   mutate(S = rowSums(dplyr::select(., all_of(colonnes_especes)) > 0))
 
-# Fusion manuelle des stades
 ref_df <- annotations_all[[site]]
 alpha_data$stade <- NA
 for(i in 1:nrow(ref_df)) {
@@ -803,7 +796,7 @@ p_richesse <- ggplot(alpha_data, aes(x = id_transect, y = S, fill = stade)) +
 print(p_richesse)
 save_graph(p_richesse, paste0("Richesse spécifique _ ", site))
 
-# Mise à jour du Viewer
+# Mise à jour du Viewer avec table des résultats de tests
 explication_alpha <- paste0("
 <div class='etape' style='border-left: 6px solid #27ae60; padding:10px;'>
   <p style='color: #27ae60; margin-top:0;'><b>Analyse de la Richesse Spécifique</b></p>
@@ -856,11 +849,11 @@ dessiner_dendrogramme <- function(marge_bas = 30, agrandir = FALSE) {
   couleurs <- couleurs_stade[as.character(df_filtre$stade[ord])]
   est_2025 <- (df_filtre$Année[ord] == min(df_filtre$Année[ord]))
 
-    # Texte des feuilles (utilisez des valeurs plus proches, ex: -0.5 et -0.8)
+    # Texte des feuilles
   text(x = at[est_2025], y = -0.5, labels = ids[est_2025], col = couleurs[est_2025], srt = 90, cex = 0.7, adj = 0, xpd = NA)
   text(x = at[!est_2025], y = -0.8, labels = ids[!est_2025], col = couleurs[!est_2025], srt = 90, cex = 0.7, adj = 0, xpd = NA)
   
-  # Texte des années (alignés sur les nouveaux y)
+  # Texte des années 
   text(x = 0, y = -0.5, labels = "2025", cex = cex_ann, font = 2, xpd = NA, pos = 2)
   text(x = 0, y = -0.8, labels = "2026", cex = cex_ann, font = 2, xpd = NA, pos = 2)  
   # Légende (agrandie sur les exports)
@@ -880,7 +873,7 @@ dessiner_dendrogramme(marge_bas = 30, agrandir = TRUE); dev.off() # agrandir = T
 par(mar = c(10, 6, 6, 4))
 dessiner_dendrogramme(marge_bas = 10, agrandir = FALSE)
 
-# Indice de Calinski-Harabasz
+# Indice de Calinski-Harabasz (CH)
 k_test <- 2:10
 
 ch_scores <- sapply(k_test, function(k) {
@@ -895,11 +888,10 @@ k_opt <- k_test[which.max(ch_scores)]
 # Clusters finaux
 df_filtre$cluster <- cutree(hc, k = k_opt)
 
-# Calcul du tableau croisé (Prop.table)
+# Calcul du tableau croisé des proportions de chaque stade ou année dans les clusters proposé par l'indice de CH
 tab_prop <- prop.table(table(df_filtre$cluster, df_filtre$stade), 1)
 
-# Génération dynamique des lignes du tableau HTML
-# Utilisation d'une boucle 'for' pour garantir l'affichage des numéros de clusters (1, 2, 3...)
+# Génération dynamique du tableau
 lignes_html <- ""
 for(i in 1:nrow(tab_prop)) {
   row_data <- tab_prop[i, ]
@@ -909,7 +901,6 @@ for(i in 1:nrow(tab_prop)) {
                         "</tr>")
 }
 
-# Création du bloc HTML complet
 etape_beta <- paste0("
 <div class='etape' style='border-left: 6px solid #e67e22; background-color: #fdf2e9; padding: 15px; margin-top: 20px;'>
   <p style='color: #e67e22; margin-top:0;'><b>🚀 ÉTAPE 3 : Diversité Bêta (Tableau de correspondance)</b></p>
